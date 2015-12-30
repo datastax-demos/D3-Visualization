@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+<head>
+    <title>Datastax Bootstrapping</title>
+    <script src="js/d3.js" type="text/javascript"></script>
+    <script src="js/jquery.js"></script>
+    
+    <link rel="stylesheet" href="css/foundation.css">
+    <script src="js/foundation.min.js"></script>
+    <script src="js/snap.svg.js"></script>
+
+    
+    <link rel="stylesheet" href="css/datastax.css">
+
+    <style>
+        body {
+            background-color: #000000;
+            color: #CCCCCC;
+        }
+
+        p, label {
+            color: #CCCCCC;
+        }
+
+        h3 {
+            color: #CCCCCC;
+        }
+
+        .button {
+            display: block;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+
+        .node {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .textClass {
+            stroke: #323232;
+            font-family: "Lucida Grande", "Droid Sans", Arial, Helvetica, sans-serif;
+            font-weight: normal;
+            stroke-width: .5;
+            font-size: 14px;
+        }
+
+        svg {
+            /*border: 1px solid #dddddd;*/
+            background-color: #2D2D2A;
+            margin: 0px;
+            margin-top: 128px;
+            padding: 0px;
+            padding-top: 50px;
+        }
+
+        .logo-row {
+            margin: 0;
+            position: fixed;
+            display: inline-block;
+            top: 0px;
+            left: 0px;
+            background-color: white;
+            border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+            width: 100%;
+            z-index: 5;
+            overflow-x: visible;
+            overflow-y: visible;
+        }
+
+        #logo {
+            text-align: center;
+            padding: 20px;
+        }
+
+        #linecolor {
+            background: black;
+            border: none;
+            padding: 0px;
+            height: 32px;
+        }
+
+        #datarate {
+            background-color: white;
+            -webkit-transform: rotate(180deg);
+            -moz-transform: rotate(180deg);
+            -o-transform: rotate(180deg);
+            -ms-transform: rotate(180deg);
+            transform: rotate(180deg);
+        }
+
+        .no-style-bullets {
+            list-style-type: none;
+            margin: 0;
+        }
+
+        .circle {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: red;
+            -moz-border-radius: 5px;
+            -webkit-border-radius: 5px;
+            border-radius: 5px;
+        }
+
+        
+        #mutations {
+            background: #8000FF;
+        }
+
+        #hints {
+            background: #008080;
+        }
+
+        #gossip {
+            background: #FFC0CB;
+        }
+
+        .none {
+            stroke: none;
+        }
+    </style>
+</head>
+<body>
+<div class="logo-row">
+    <center><img id="logo" src="img/datastax.png"/></center>
+</div>
+<div class="row">
+    <div id="content" class="large-12 medium-12 small-12 columns">
+
+    </div>
+</div>
+<div class="row">
+
+    <div class="large-3 medium-3 small-3 columns">
+        <h3>Operations</h3>
+        <a class="button" onclick="addNodes()">Add Node</a>
+        <a class="button" onclick="decommission()">Decommission</a>
+        <!--<a class="button" onclick="TestSnap()">Path Color</a>-->
+    </div>
+
+    <div class="large-3 medium-3 small-3 columns">
+        <h3>Developer Options</h3>
+        <label for="linecolor">Line Color</label>
+        <input type="color" id="linecolor" name="linecolor" value="#ffffff"/>
+        <input type="hidden" id="realcolor" value="#ffffff"/>
+        <label for="datarate">Amount of Data</label>
+        <input id="datarate" name="datarate" type="range" min="100" max="4000"
+               step="100" value="2000"/>
+        <br>
+
+        <input id="showpath" name="showpath" type="checkbox"/>
+        <label for="showpath">Show Path Lines</label>
+    </div>
+
+    <div class="large-3 medium-3 small-3 columns">
+        <h3>Instructions</h3>
+
+        <ul>
+            <li>Double click a node to kill it.</li>
+            <li>Double click again to put back online.</li>
+        </ul>
+    </div>
+
+    <div class="large-3 medium-3 small-3 columns">
+        <h3>Data Types</h3>
+
+        <ul class="no-style-bullets">
+            <li><span class="circle" id="mutations"></span> Mutations</li>
+            <li><span class="circle" id="hints"></span> Hints</li>
+            <li><span class="circle" id="gossip"></span> Gossip</li>
+        </ul>
+    </div>
+</div>
+<script>
+    
+    /// Initialization Variables 
+    var maxwait = 2000;
+    var graph;
+    var aspect = 1.61803;
+    var w = $("#content").width();
+    var h = w / aspect;
+    
+    var circles = [];
+    var filled = false;
+
+    var pathlength = h * .7;
+    var time_boot = 8000, time_decom = 8000;
+
+    var radius_small = 12, radius_large = 24;
+    var blue = '#027995',
+            green = '#009a00',
+            orange = '#CC6600',
+            yellow = '#DDAF53',
+            blue = '#007896',
+            otherorange = '#C85E12',
+            red = '#B20000';
+    
+    var mutations = '#8000FF',
+        hints = '#008080',
+        gossips = '#FFC0CB';
+    /// End Initialization Variables
+    
+    function myGraph() {
+
+        // Add and remove elements on the graph object
+        this.addNode = function (type) {
+            nodes.push({"id": type});
+
+            // when it finishes loading, set class to stable
+            setTimeout(function () {
+                Snap("#node-" + type).data('status', 'stable')
+            }, time_boot);
+            setTimeout(function () {
+                Snap("#node-" + type).data('status', 'bootstrapping')
+            }, 300);
+
+            var thisnode = nodes[nodes.length - 1];
+            for (var j = 0; j < nodes.length - 1; j++) {
+                var source = d3.select("#node-" + thisnode.id);
+                var dest = d3.select("#node-" + nodes[j].id);
+                var sourcenotdead = true, destnotdead = true;
+
+                if (nodes[j].id == 1)
+                    links.push({
+                        "source": thisnode,
+                        "target": nodes[j],
+                        "value": pathlength / 2
+                    });
+
+                if (!source.empty()) {
+                    if (source.classed("decom"))
+                        sourcenotdead = false;
+                }
+                if (!dest.empty()) {
+                    if (dest.classed("decom"))
+                        destnotdead = false;
+                }
+                if (sourcenotdead && destnotdead) {
+                    // check to see if the source is the root node, if so add a link
+                    links.push({
+                        "source": thisnode,
+                        "target": nodes[j],
+                        "value": pathlength
+                    });
+                    links.push({
+                        "source": nodes[j],
+                        "target": thisnode,
+                        "value": pathlength
+                    });
+                }
+            }
+            update();
+        };
+
+        /// Adds a node from the graph
+        this.removeNode = function (id) {
+            var i = 0;
+            var n = findNode(id);
+            while (i < links.length) {
+                if ((links[i]['source'] == n) || (links[i]['target'] == n)) {
+                    links.splice(i, 1);
+                }
+                else i++;
+            }
+            nodes.splice(findNodeIndex(id), 1);
+            update();
+            
+        };
+
+        /// Removes a link from the graph
+        this.removeLink = function (source, target) {
+            for (var i = 0; i < links.length; i++) {
+                if (links[i].source.id == source && links[i].target.id == target) {
+                    var spliced = links.splice(i, 1);
+                    break;
+                }
+            }
+            update();
+        };
+        
+        this.removeallLinks = function () {
+            
+            links.splice(0, links.length);
+            update();
+        };
+
+        this.removeAllNodes = function () {
+            
+            nodes.splice(0, links.length);
+            update();
+        };
+
+        this.addLink = function (source, target, value) {
+            links.push({
+                "source": findNode(source),
+                "target": findNode(target),
+                "value": value
+            });
+            update();
+        };
+
+        var findNode = function (id) {
+            for (var i in nodes) {
+                if (nodes[i]["id"] === id) return nodes[i];
+            }
+        };
+
+        var findNodeIndex = function (id) {
+            for (var i = 0; i < nodes.length; i++) {
+                if (nodes[i].id == id) {
+                    return i;
+                }
+            }
+        };
+
+        /// Initialization of the Graph
+        var vis = d3.select("#content")
+                .append("svg:svg")
+                .attr("width", w)
+                .attr("height", h)
+                .attr("id", "forcegraph")
+                .attr("pointer-events", "all")
+                .attr("viewBox", "0 0 " + w + " " + h)
+                .attr("perserveAspectRatio", "xMinYMid")
+                .append('svg:g');
+
+        var force = d3.layout.force();
+
+        var nodes = force.nodes(),
+                links = force.links();
+        
+        /// Responsible for adding the initial nodes and links to the graph.
+        var update = function () {
+            var link = vis.selectAll("path")
+                    .data(links, function (d) {
+                        return d.source.id + "-" + d.target.id;
+                    });
+
+            var linkEnter = link.enter().append("path")
+                    .attr("id", function (d) {
+                        return "l" + d.source.id + "-" + d.target.id;
+                    })
+                    .attr("stroke-width", function (d) {
+                        if ($('#showpath').prop('checked'))
+                            return 1;
+                        else
+                            return 0;
+                    })
+                    .attr("stroke", function (d) {
+                        return $("#realcolor").val();
+                    })
+                    .attr("fill", "none")
+                    .attr("class", function (d) {
+                        if (d.target.id == 1)
+                            return "none";
+                        else
+                            return "link";
+                    });
+            link.exit()
+                .remove();
+
+            var node = vis.selectAll("g.node")
+                    .data(nodes, function (d) {
+                        return d.id;
+                    });
+            var nodeEnter = node.enter().append("g")
+                    .attr("class", "node")
+                    .on("dblclick", function (d) {
+                        // graph.removeNode(d.id);
+                        var thisnode = d3.select("#node-" + d.id)
+                        if (thisnode.classed("killed"))  // its already killed, bring it back up
+                        {
+                            var str = "#node-" + d.id;
+                            Snap(str).data('status', 'restarting')
+                            setTimeout(
+                                    function (id) {
+                                        Snap(id).data('status', 'stable');
+                                    },
+                                    time_boot,
+                                    str);
+                            var justid = d.id;
+                            d3.select(str)
+                                    .classed("killed", false)
+                                    .attr("fill", yellow)
+                                    .transition()
+                                    .duration(time_boot)
+                                    .attr("r", radius_large)
+                                    .each('end', function (d) {
+                                        var str = "#node-" + d.id;
+                                        d3.select(str)
+                                                .attr("fill", green);
+                                    });
+
+                            Snap.selectAll(".circle").forEach(function (elem, i) {
+                                if (elem.hasClass("decom") || elem.hasClass("killed")) {
+                                    return;
+                                }
+                                else {
+                                    graph.addLink(d.id, elem.node.__data__.id, pathlength);
+                                }
+                            });
+
+                        }
+                        else {  // node was stable, sent it to dead
+                            var str = "#node-" + d.id;
+                            Snap(str).data('status', 'dead');
+                            var justid = d.id;
+                            d3.select(str)
+                                    .classed("killed", true)
+                                    .attr("fill", red)
+                                    .transition()
+                                    .duration(time_decom)
+                                    .attr("r", radius_small);
+
+//                            $(".link").each(function( index, value ) {
+//                                if (value.__data__.source.id == justid || value.__data__.target.id == justid)
+//                                {
+//                                    graph.removeLink(value.__data__.source.id, value.__data__.target.id);
+//                                }
+//                            });
+                        }
+                        keepNodesOnTop();
+
+                    })
+                    .call(force.drag);
+
+            function endgrow(transition, callback) {
+                this.attry('fill', green);
+            }
+            nodeEnter.append("svg:circle")
+                    .attr("r", function (d, i) {
+                        if (i == 0)
+                            return 100;
+                        else
+                            return radius_small;
+                    })
+                    .attr("id", function (d) {
+                        return "node-" + d.id;
+                    })
+                    .attr("class", function (d, i) {
+                        if (i == 0)
+                            return "decom";
+                        else
+                            return "nodeStrokeClass circle";
+                    })
+                    .attr("fill", function (d, i) {
+                        if (i == 0)
+                            return "none";
+                        else
+                            return blue;
+                    })
+                    .attr("stroke", function (d, i) {
+                        return "none";
+                    })
+                    .transition()
+                    .delay(0)
+                    .duration(time_boot)
+                    .attr("r", function (d, i) {
+                        if (i == 0)
+                            return 100;
+                        else
+                            return radius_large;
+                    })
+                    .each('end', function (d, i) {
+                        if (i == 0)
+                            return;
+                        else
+                            $(this).attr('fill', green);
+                    });
+
+
+            nodeEnter.append("svg:text")
+                    .attr("class", "textClass")
+                    .attr("x", 14)
+                    .attr("y", ".31em")
+                    .text(function (d) {
+                        return '';//d.id;
+                    });
+
+
+            node.exit()
+                .remove();
+                /// Animating the initial nodes in growing and positioning themselves on the page
+            force.on("tick", function () {
+                node.attr("transform", function (d) {
+                    return "translate(" + d.x + "," + d.y + ")";
+                });
+
+                link.attr("d", function (d) {
+                    var dx = d.target.x - d.source.x,
+                            dy = d.target.y - d.source.y,
+                            dr = Math.sqrt(dx * dx + dy * dy);
+                    return "M" + d.source.x + "," + d.source.y + "A" + dr + "," + dr + " 0 0,1 " + d.target.x + "," + d.target.y;
+                });
+//                link.attr("x1", function (d) {
+//                    return d.source.x;
+//                })
+//                .attr("y1", function (d) {
+//                    return d.source.y;
+//                })
+//                .attr("x2", function (d) {
+//                    return d.target.x;
+//                })
+//                .attr("y2", function (d) {
+//                    return d.target.y;
+//                });
+            });
+
+            // Restart the force layout.
+            force
+                    .gravity(.1)
+                //.distance(50)
+                    .charge(0)
+                //.linkStrength(1)
+                    .friction(0)
+                    .alpha(0)
+                    .linkDistance(function (d) {
+                        return d.value;
+                    })
+                    .size([w, h])
+                    .start();
+//                    .on('end', function() {
+//                        MakeCircles();
+//                    });
+
+        }; // end update function
+
+        setTimeout(MakeCircles, 500);
+
+        // Make it all go
+        update();
+    } // End MyGraph();
+    
+    
+    
+    function MakeCircles() {
+        // Clears all the existing intervals
+        interval.clearAll();
+        
+        var snapA = Snap("#forcegraph");
+        
+        /// Creates a Circle based on the number of links represented, and pushes it to
+        /// a queue so that they can be reused.
+        Snap.selectAll(".link").forEach(function (elem, i) {
+
+            if (elem.hasClass("linkdecom"))
+                return;
+
+            // between .3 and 3.5 seconds
+            var min =maxwait * .8,
+                    max = maxwait * 1.2,
+                    highlightedNumber = Math.random() * (max - min) + min;
+            var intervalTime = highlightedNumber; //Math.floor(Math.random() * maxwait) + 300;
+            
+            
+            var CircleA = circles.pop();
+            /// Pulls the last Circle off and checks to see if we can reuse it
+            /// Undefined: There arent any circles currently in the array and a new one needs to be added
+            /// Status == false: If the status is false it tells us that the animation is currently in use and a new one needs to be added
+            if( CircleA == undefined)
+            {
+                 CircleA = {
+                    circle: snapA.circle(-10, -10, 0),
+                    status: false,
+                    animations: [],
+					index: circles.length,
+                };
+                
+                circles.push(CircleA);
+            }
+            else if(CircleA.status == false)
+            {
+                circles.push(CircleA);
+                CircleA = {
+                    circle: snapA.circle(-10, -10, 0),
+                    status: false,
+                    animations: [],
+					index: circles.length,
+                };
+                
+                circles.push(CircleA);
+
+            }
+
+            
+            /// Assign the interval to trigger the animations and adds it to our interval object
+            /// which tracks the intervals we have running.
+            interval.make(createInterval(elem, snapA,CircleA, intervalTime));
+            //createInterval(elem, snapA,CircleA, intervalTime);
+        });
+    }
+    
+    function createInterval(elem, snapA, CircleA, timetostart)
+    {
+
+            setInterval(function()
+            {
+                /// This allows the previous animations to finish completely, as they are cleared from the 
+                /// animation array inside of CircleA on the callback of the outer most animation
+                /// NOTE: Without this, it causes stuttering as the interval may or may not be greater than the time
+                /// it takes to finish all the animations
+                if(!CircleA.status)
+                {
+                    CircleA.status = true;
+                var sourcenode = Snap("#node-" + elem.node.__data__.source.id);
+                var sourcestate = sourcenode.data('status');
+                var destnode = Snap("#node-" + elem.node.__data__.target.id);
+                var deststate = destnode.data('status');
+                
+                var localpurp = 1;
+                var localteal = 1;
+                var localpink = 1;
+
+                // remember that bootstrapping is 'undefined'
+                if (typeof sourcestate == 'undefined') // only send pink
+                {
+                    localpurp = 0;
+                    localteal = 0;
+                }
+                // only send purple from these two
+                var sendpurple = ['stable', 'decommissioned']
+                if (sendpurple.indexOf(sourcestate) == -1) {
+                    localpurp = 0;
+                }
+
+                var recievepurple = ['stable', 'bootstrapping']
+                if (recievepurple.indexOf(deststate) == -1) {
+                    localpurp = 0;
+                }
+
+                var sendhints = ['stable']
+                if (sendpurple.indexOf(sourcestate) == -1) {
+                    localteal = 0;
+                }
+                var rechints = ['bootstrapping', 'stable']
+                if (rechints.indexOf(deststate) == -1) {
+                    localteal = 0;
+                }
+                // only one that doesnt send hints is dead
+                if (sourcestate == 'dead') {
+                    localpink = 0;
+                }
+
+                var len = elem.getTotalLength();
+
+                var num = Math.floor(Math.random() * 10) + 1;
+                ///Switches the circles state to a mutation, gossip, or hint and adjusts the color accordingly
+                switch (num) {
+                    case 10:
+                    case 9:
+                        CircleA.circle.attr({
+                            fill: $("#hints").css("background-color"),
+                            opacity: localteal
+                        });
+                        break;
+                    case 1:
+                    case 2:
+                        CircleA.circle.attr({
+                            fill:  $("#gossip").css("background-color"),
+                            opacity: localpink
+                        });
+                        break;
+                    default:
+                        CircleA.circle.attr({
+                            fill:  $("#mutations").css("background-color"),
+                            opacity: localpurp
+                        });
+                }
+                var timeinmotion = Math.floor(Math.random() * 2000) + 3000;
+                
+                /// This is responsible for animating the various circles across the page
+                /// The created animations are pushed to an array inside of Circle A so that I can later free them
+                /// For some reason these werent being garbage collected correctly and leading to a memory build up               
+                CircleA.animations.push(Snap.animate(0, len, function (value) {
+                    movePoint = elem.getPointAtLength(value);
+                       CircleA.animations.push(CircleA.circle.animate({r: 6}, 300));
+                       CircleA.circle.attr({cx: movePoint.x, cy: movePoint.y}); // move along path via cx & cy attributes
+                    }, timeinmotion, mina.easeinout, function () {
+                         CircleA.animations.push(CircleA.circle.animate({r: 0}, 300, mina.easeinout, function () {
+                            var index = circles.indexOf(CircleA);
+                            if(index > -1)
+                            {
+                                circles.splice(index, 1);
+                            }
+                            circles.push(CircleA);
+                         }));
+                                    CircleA.status = false;
+                                    while(CircleA.animations.length > 0)
+                                    {
+                                        var animation = CircleA.animations.pop();
+                                        delete animation;
+                                    }
+                               
+                    }));
+                 }
+				
+            }, timetostart);        
+    }
+    /// Helper function that simply forces the circles to the top of the page
+    function keepNodesOnTop() {
+        $(".nodeStrokeClass").each(function (index) {
+            var gnode = this.parentNode;
+            gnode.parentNode.appendChild(gnode);
+        });
+        MakeCircles();
+    }
+    
+
+</script>
+</body>
+<script>
+    /// Object responsible for tracking the animation timers or intervals
+    var interval = {
+        
+        intervals: {},
+
+        //create another interval
+        make: function (id) {
+            this.intervals[id] = true;
+            
+        },
+
+        //clear a single interval
+        clear: function (id) {
+            return clearInterval(this.intervals[id]);
+        },
+        reset: function()
+        {
+            this.intervals = {};
+        },
+        //clear all intervals
+        clearAll: function () {
+            
+            var all = Object.keys(this.intervals), len = all.length;
+
+            while (len-- > 0) {
+                clearInterval(all.shift());
+            }
+        }
+    };
+    
+    function firstNodes(graph) {
+        graph.addNode(Math.floor((Math.random() * 100000) + 1));
+    }
+    // add the default nodes
+    graph = new myGraph("#svgdiv");
+    graph.addNode(1);
+    
+    /// Creates the initial 5 nodes
+    for (i = 0; i < 5; ++i) {
+        setTimeout(function () {
+            firstNodes(graph)
+        }, Math.random() * 5000);
+    }
+    /// Starts the data animations by initializing the circles
+    setTimeout(MakeCircles, 5000);
+    keepNodesOnTop();
+
+
+</script>
+
+<script>
+    /// UI Event Listeners   
+    var vis = $("#forcegraph");
+    $(window).on("resize", function () {
+        var targetWidth = vis.parent().width();
+        vis.attr("width", targetWidth);
+        vis.attr("height", targetWidth / aspect);
+    });
+    $(document).foundation();
+
+    $('#linecolor').on('input', function () {
+        $(".link").css("stroke", this.value);
+        $("#realcolor").val(this.value);
+        //  $(".node").css("stroke", this.value);
+    });
+    
+    $("#datarate").on("mouseup", function () {
+        maxwait = this.value;
+        MakeCircles();
+    });
+    $("#showpath").change(function () {
+        if (this.checked) {
+            Snap.selectAll(".link").attr({strokeWidth: "1px"});
+        }
+        else {
+            Snap.selectAll(".link").attr({strokeWidth: "0px"});
+        }
+    }); 
+</script>
+
+<script>
+    ///Button Functions
+    
+    function addNodes() {
+        graph.addNode(Math.floor((Math.random() * 100000) + 1))
+        
+        keepNodesOnTop();
+    }
+
+    function decommission() {
+        var things = $('.node circle:not(.decom)');
+        if (things.length == 1)
+            return false;
+
+        var idtokill = $(things[Math.floor(Math.random() * things.length)]).attr('id');
+        var str = "#" + idtokill;
+        Snap(str).data('status', 'decommissioned');
+        var justid = idtokill.split("-")[1]
+        d3.select(str)
+                .classed("decom", true)
+                .attr("fill", orange)
+                .transition()
+                .duration(time_decom)
+                .attr("r", radius_small)
+                .each('end', function (d) {
+                    graph.removeNode(justid);
+                });
+
+        // if this id is a source or destination, transition the path lengths
+        $(".link").each(function (index, value) {
+            if (value.__data__.source.id == justid || value.__data__.target.id == justid) {
+                var linkid = "#" + this.id;
+                var link = Snap.select(linkid);
+                link.addClass("linkdecom");
+                // $(this).addClass('linkdecom');
+//                graph.removeLink(value.__data__.source.id, value.__data__.target.id);
+//                graph.addLink(value.__data__.source.id, value.__data__.target.id, pathlength * 1.3);
+                setTimeout(function () {
+                    graph.removeLink(value.__data__.source.id, value.__data__.target.id);
+                }, time_decom);
+            }
+        });
+        keepNodesOnTop();
+    }
+	
+
+</script>
+
+
+</html>
